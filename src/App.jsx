@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { supabase } from './supabaseClient';
 import LoginPage from './pages/LoginPage';
 import RegisterPage from './pages/RegisterPage';
+import RecoveryPage from './pages/RecoveryPage';
 import HomePage from './pages/HomePage';
 import ProfilePage from './pages/ProfilePage';
 import LabLesson from './pages/LabLesson';
@@ -75,14 +76,13 @@ function App() {
     try {
       const { data, error } = await supabase
         .from('sysadmin_students')
-        .select('*')
+        .select('id, student_number, student_name, section_number, progress, total_score, overall_grade, registered_at')
         .order('registered_at', { ascending: false });
       if (!error && data && data.length > 0) {
         const transformedStudents = data.map(student => ({
           id: student.id,
           studentNumber: student.student_number,
           studentName: student.student_name,
-          password: student.password,
           sectionNumber: student.section_number,
           progress: student.progress || {},
           totalScore: student.total_score || 0,
@@ -117,18 +117,17 @@ function App() {
       return true;
     }
     try {
-      const { data: student, error } = await supabase
-        .from('sysadmin_students')
-        .select('*')
-        .eq('student_number', studentNumber)
-        .eq('password', password)
-        .single();
-      if (!error && student) {
+      const { data: student, error } = await supabase.rpc('sysadmin_student_login', {
+        p_student_number: studentNumber.trim(),
+        p_password: password
+      });
+      // Database reachable and credentials checked: trust its answer.
+      if (!error && !student?.success) return false;
+      if (!error && student?.success) {
         const transformedStudent = {
           id: student.id,
           studentNumber: student.student_number,
           studentName: student.student_name,
-          password: student.password,
           sectionNumber: student.section_number,
           progress: student.progress || {},
           totalScore: student.total_score || 0,
@@ -156,33 +155,19 @@ function App() {
 
   const handleRegister = async (data) => {
     try {
-      const { data: existing } = await supabase
-        .from('sysadmin_students')
-        .select('student_number')
-        .eq('student_number', data.studentNumber)
-        .single();
-      if (existing) {
-        return false;
-      }
-      const { data: newStudent, error } = await supabase
-        .from('sysadmin_students')
-        .insert([{
-          student_number: data.studentNumber,
-          student_name: data.studentName,
-          password: data.password,
-          section_number: data.sectionNumber,
-          progress: {},
-          total_score: 0,
-          overall_grade: 'N/A'
-        }])
-        .select()
-        .single();
+      const { data: result, error } = await supabase.rpc('sysadmin_register_student', {
+        p_student_name: data.studentName.trim(),
+        p_student_number: data.studentNumber.trim(),
+        p_section_number: data.sectionNumber,
+        p_password: data.password
+      });
+      if (!error && !result?.success) return false;
+      const newStudent = result?.student;
       if (!error && newStudent) {
         const transformedUser = {
           id: newStudent.id,
           studentNumber: newStudent.student_number,
           studentName: newStudent.student_name,
-          password: newStudent.password,
           sectionNumber: newStudent.section_number,
           progress: {},
           totalScore: 0,
@@ -222,6 +207,19 @@ function App() {
     localStorage.setItem('sysadminUser', JSON.stringify(localUser));
     setCurrentPage('home');
     return true;
+  };
+
+  const handlePasswordRecovery = async (studentNumber, recoveryCode, newPassword) => {
+    const { data, error } = await supabase.rpc('sysadmin_reset_student_password', {
+      p_student_number: studentNumber.trim(),
+      p_recovery_code: recoveryCode.trim(),
+      p_new_password: newPassword
+    });
+    if (error) {
+      console.error('Password recovery error:', error);
+      return false;
+    }
+    return data === true;
   };
 
   const handleLogout = () => {
@@ -286,6 +284,7 @@ function App() {
 
   if (!user) {
     if (currentPage === 'register') return <RegisterPage onRegister={handleRegister} onNavigate={navigate} />;
+    if (currentPage === 'recover') return <RecoveryPage onRecover={handlePasswordRecovery} onNavigate={navigate} />;
     return <LoginPage onLogin={handleLogin} onNavigate={navigate} />;
   }
 
